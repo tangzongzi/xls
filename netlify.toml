@@ -13,7 +13,7 @@
 
 # 环境变量设置
 [build.environment]
-  NODE_VERSION = "18"
+  NODE_VERSION = "20"
 
 # 头部设置，用于缓存优化
 [[headers]]
