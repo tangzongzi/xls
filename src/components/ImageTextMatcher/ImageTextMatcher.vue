@@ -4,7 +4,10 @@ import TextInput from '../TextInput/TextInput.vue';
 import ImageSelector from '../ImageSelector/ImageSelector.vue';
 import html2canvas from 'html2canvas';
 import axios from 'axios';
-import { loadApiKeys, setApiKey as saveApiKey } from '../../services/imageApi';
+import { loadApiKeys, setApiKey as saveApiKey, getApiConfig, searchImages as searchImagesAPI } from '../../services/imageApi';
+
+// 定义事件
+const emit = defineEmits(['showTutorial']);
 
 // 状态管理
 const selectedImage = ref(null);
@@ -39,7 +42,7 @@ const loadSignatureSettings = () => {
       Object.assign(signature, settings);
     }
   } catch (error) {
-    console.log('加载签名设置失败:', error);
+    // 加载签名设置失败，使用默认值
   }
 };
 
@@ -48,7 +51,7 @@ const saveSignatureSettings = () => {
   try {
     localStorage.setItem('signature-settings', JSON.stringify(signature));
   } catch (error) {
-    console.log('保存签名设置失败:', error);
+    // 保存签名设置失败，忽略错误
   }
 };
 
@@ -159,28 +162,8 @@ const createSignatureElement = () => {
   return signatureElement;
 };
 
-// 图片搜索API配置
-const apiConfig = reactive({
-  // 这里可以配置不同的无版权图片API
-  unsplash: {
-    baseUrl: 'https://api.unsplash.com/search/photos',
-    apiKey: '', // 需要用户提供
-    perPage: 90, // 10页 * 9张/页 = 90张
-    maxPages: 10
-  },
-  pexels: {
-    baseUrl: 'https://api.pexels.com/v1/search',
-    apiKey: '', // 需要用户提供
-    perPage: 90, // 10页 * 9张/页 = 90张
-    maxPages: 10
-  },
-  pixabay: {
-    baseUrl: 'https://pixabay.com/api/',
-    apiKey: '', // 需要用户提供
-    perPage: 90, // 10页 * 9张/页 = 90张
-    maxPages: 10
-  }
-});
+// 获取API配置的响应式引用
+const apiConfig = reactive(getApiConfig());
 
 
 
@@ -220,6 +203,43 @@ const addTemplateText = (template) => {
 
 // 当前选择的API - 默认为Pexels
 const selectedApi = ref('pexels');
+
+// API优先级设置
+const apiPriority = ref('auto'); // 'auto' 表示自动选择，或具体的API名称
+
+// 获取可用的API列表（有密钥的）
+const getAvailableApis = () => {
+  return Object.keys(apiConfig).filter(api => apiConfig[api].apiKey && apiConfig[api].apiKey.trim());
+};
+
+// 获取首选API
+const getPreferredApi = () => {
+  const availableApis = getAvailableApis();
+  
+  if (availableApis.length === 0) {
+    return null; // 没有可用的API
+  }
+  
+  if (availableApis.length === 1) {
+    // 只有一个API，直接使用
+    return availableApis[0];
+  }
+  
+  // 多个API时，检查用户是否设置了优先级
+  if (apiPriority.value !== 'auto' && availableApis.includes(apiPriority.value)) {
+    return apiPriority.value;
+  }
+  
+  // 如果是自动模式或用户设置的API不可用，按优先级返回第一个可用的
+  const defaultPriority = ['pexels', 'unsplash', 'pixabay'];
+  for (const api of defaultPriority) {
+    if (availableApis.includes(api)) {
+      return api;
+    }
+  }
+  
+  return availableApis[0]; // 兜底
+};
 
 // 中文关键词翻译为英文
 const translateKeyword = (keyword) => {
@@ -359,84 +379,55 @@ const searchImages = async (query) => {
   
   // 将中文关键词翻译为英文
   const translatedQuery = translateKeyword(query.trim());
-  console.log(`搜索关键词: ${query} -> ${translatedQuery}`);
   
   isLoading.value = true;
   error.value = null;
   
   try {
-    let images = [];
-    const api = apiConfig[selectedApi.value];
+    // 获取首选API
+    const preferredApi = getPreferredApi();
     
-    if (!api.apiKey) {
-      error.value = `请先设置${selectedApi.value}的API密钥`;
+    if (!preferredApi) {
+      error.value = '请先设置至少一个API密钥';
       generatedImages.value = [];
       isLoading.value = false;
       return;
     }
     
-    // 根据不同API构建请求
-    let response;
-    switch(selectedApi.value) {
-      case 'unsplash':
-        response = await axios.get(api.baseUrl, {
-          params: {
-            query: translatedQuery,
-            per_page: api.perPage,
-            client_id: api.apiKey
-          }
-        });
-        images = response.data.results.map(item => ({
-          id: item.id,
-          url: item.urls.regular,
-          thumb: item.urls.thumb,
-          alt: item.alt_description || query
-          // 水印信息已移除
-        }));
-        break;
-        
-      case 'pexels':
-        response = await axios.get(api.baseUrl, {
-          params: {
-            query: translatedQuery,
-            per_page: api.perPage
-          },
-          headers: {
-            Authorization: api.apiKey
-          }
-        });
-        images = response.data.photos.map(item => ({
-          id: item.id,
-          url: item.src.large,
-          thumb: item.src.medium,
-          alt: query
-          // 水印信息已移除
-        }));
-        break;
-        
-      case 'pixabay':
-        response = await axios.get(api.baseUrl, {
-          params: {
-            q: translatedQuery,
-            per_page: api.perPage,
-            key: api.apiKey
-          }
-        });
-        images = response.data.hits.map(item => ({
-          id: item.id,
-          url: item.largeImageURL,
-          thumb: item.previewURL,
-          alt: query
-          // 水印信息已移除
-        }));
-        break;
-    }
+    // 更新当前选择的API
+    selectedApi.value = preferredApi;
     
+    // 使用service中的搜索方法
+    const images = await searchImagesAPI(translatedQuery, preferredApi);
     generatedImages.value = images;
   } catch (err) {
-    console.error('Error fetching images:', err);
-    error.value = '获取图片失败，请检查API配置或网络连接';
-    generatedImages.value = [];
+    // 尝试回退到其他可用的API
+    const availableApis = getAvailableApis().filter(api => api !== selectedApi.value);
+    if (availableApis.length > 0) {
+      try {
+        const fallbackApi = availableApis[0];
+        const images = await searchImagesAPI(translatedQuery, fallbackApi);
+        generatedImages.value = images;
+        
+        // 显示回退提示
+        const fallbackMessage = document.createElement('div');
+        fallbackMessage.textContent = `${selectedApi.value}暂时不可用，已自动切换到${fallbackApi}`;
+        fallbackMessage.className = 'fixed top-4 right-4 bg-yellow-500 text-white px-4 py-2 rounded shadow-lg';
+        document.body.appendChild(fallbackMessage);
+        setTimeout(() => {
+          if (document.body.contains(fallbackMessage)) {
+            document.body.removeChild(fallbackMessage);
+          }
+        }, 3000);
+        
+      } catch (fallbackErr) {
+        error.value = '所有图片源都暂时不可用，请稍后再试或检查API配置';
+        generatedImages.value = [];
+      }
+    } else {
+      error.value = '获取图片失败，请检查API配置或网络连接';
+      generatedImages.value = [];
+    }
   } finally {
     isLoading.value = false;
   }
@@ -564,7 +555,6 @@ const generateFinalImage = async () => {
     link.download = `小绿书图文_HD_${new Date().getTime()}.png`;
     link.click();
   } catch (err) {
-    console.error('Error generating image:', err);
     error.value = '生成图片失败，请重试';
   }
 };
@@ -703,7 +693,6 @@ const batchGenerateAndDownload = async () => {
         // 清理临时元素
         document.body.removeChild(tempContainer);
       } catch (err) {
-        console.error(`生成第${i+1}张图片失败:`, err);
         // 清理临时元素
         document.body.removeChild(tempContainer);
       }
@@ -715,7 +704,6 @@ const batchGenerateAndDownload = async () => {
       error.value = '生成图片失败，请重试';
     }
   } catch (err) {
-    console.error('批量生成图片失败:', err);
     error.value = '批量生成图片失败，请重试';
   } finally {
     batchGenerating.value = false;
@@ -750,6 +738,19 @@ const setApiKey = (api, key) => {
   }, 2000);
 };
 
+// 保存API优先级设置
+const saveApiPriority = () => {
+  localStorage.setItem('api_priority', apiPriority.value);
+};
+
+// 从本地存储加载API优先级
+const loadApiPriority = () => {
+  const saved = localStorage.getItem('api_priority');
+  if (saved) {
+    apiPriority.value = saved;
+  }
+};
+
 // 组件挂载时加载保存的API密钥
 onMounted(() => {
   // 从localStorage加载API密钥
@@ -766,81 +767,11 @@ onMounted(() => {
   // 加载签名设置
   loadSignatureSettings();
   
-  // 初始加载一些示例图片
-  generatedImages.value = [
-    {
-      id: 'demo1',
-      url: 'https://images.unsplash.com/photo-1522202176988-66273c2fd55f?w=500',
-      thumb: 'https://images.unsplash.com/photo-1522202176988-66273c2fd55f?w=200',
-      alt: '示例图片 - 学习'
-    },
-    {
-      id: 'demo2', 
-      url: 'https://images.unsplash.com/photo-1544027993-37dbfe43562a?w=500',
-      thumb: 'https://images.unsplash.com/photo-1544027993-37dbfe43562a?w=200',
-      alt: '示例图片 - 情感'
-    },
-    {
-      id: 'demo3',
-      url: 'https://images.unsplash.com/photo-1506905925346-21bda4d32df4?w=500', 
-      thumb: 'https://images.unsplash.com/photo-1506905925346-21bda4d32df4?w=200',
-      alt: '示例图片 - 自然'
-    },
-    {
-      id: 'demo4',
-      url: 'https://images.unsplash.com/photo-1469474968028-56623f02e42e?w=500',
-      thumb: 'https://images.unsplash.com/photo-1469474968028-56623f02e42e?w=200', 
-      alt: '示例图片 - 风景'
-    },
-    {
-      id: 'demo5',
-      url: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=500',
-      thumb: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=200',
-      alt: '示例图片 - 思考'
-    },
-    {
-      id: 'demo6',
-      url: 'https://images.unsplash.com/photo-1518837695005-2083093ee35b?w=500',
-      thumb: 'https://images.unsplash.com/photo-1518837695005-2083093ee35b?w=200',
-      alt: '示例图片 - 海洋'
-    },
-    {
-      id: 'demo7',
-      url: 'https://images.unsplash.com/photo-1471879832106-c7ab9e0cee23?w=500',
-      thumb: 'https://images.unsplash.com/photo-1471879832106-c7ab9e0cee23?w=200',
-      alt: '示例图片 - 夜空'
-    },
-    {
-      id: 'demo8',
-      url: 'https://images.unsplash.com/photo-1506905925346-21bda4d32df4?w=500',
-      thumb: 'https://images.unsplash.com/photo-1506905925346-21bda4d32df4?w=200',
-      alt: '示例图片 - 山景'
-    },
-    {
-      id: 'demo9',
-      url: 'https://images.unsplash.com/photo-1441974231531-c6227db76b6e?w=500',
-      thumb: 'https://images.unsplash.com/photo-1441974231531-c6227db76b6e?w=200',
-      alt: '示例图片 - 森林'
-    },
-    {
-      id: 'demo10',
-      url: 'https://images.unsplash.com/photo-1500382017468-9049fed747ef?w=500',
-      thumb: 'https://images.unsplash.com/photo-1500382017468-9049fed747ef?w=200',
-      alt: '示例图片 - 湖泊'
-    },
-    {
-      id: 'demo11',
-      url: 'https://images.unsplash.com/photo-1448375240586-882707db888b?w=500',
-      thumb: 'https://images.unsplash.com/photo-1448375240586-882707db888b?w=200',
-      alt: '示例图片 - 海滩'
-    },
-    {
-      id: 'demo12',
-      url: 'https://images.unsplash.com/photo-1464822759844-d150baef493e?w=500',
-      thumb: 'https://images.unsplash.com/photo-1464822759844-d150baef493e?w=200',
-      alt: '示例图片 - 草原'
-    }
-  ];
+  // 加载API优先级设置
+  loadApiPriority();
+  
+  // 初始图片列表为空，等待用户搜索
+  generatedImages.value = [];
 });
 </script>
 
@@ -900,6 +831,42 @@ onMounted(() => {
             <p class="mt-1 text-xs text-gray-500">
               输入API密钥后，系统将自动保存并启用该图片源。
             </p>
+          </div>
+          
+          <!-- API优先级设置 -->
+          <div v-if="getAvailableApis().length > 1" class="border-t border-gray-200 pt-4">
+            <label class="block text-sm font-medium text-gray-700 mb-2">优先使用的图片源：</label>
+            <select 
+              v-model="apiPriority"
+              @change="saveApiPriority"
+              class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+            >
+              <option value="auto">智能选择（系统自动选择最佳API）</option>
+              <option 
+                v-for="api in getAvailableApis()" 
+                :key="api" 
+                :value="api"
+              >
+                优先使用 {{ api.charAt(0).toUpperCase() + api.slice(1) }}
+              </option>
+            </select>
+            <p class="mt-1 text-xs text-gray-500">
+              当配置多个API时，可以设置优先使用的图片源。选择"智能选择"将根据API质量自动选择。
+            </p>
+          </div>
+          
+          <!-- API教程链接 -->
+          <div class="border-t border-gray-200 pt-4">
+            <button 
+              @click="emit('showTutorial')"
+              class="w-full flex items-center justify-center px-4 py-3 bg-gradient-to-r from-blue-500 to-indigo-500 text-white rounded-lg hover:from-blue-600 hover:to-indigo-600 transition-all duration-200 text-sm font-medium"
+            >
+              <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+              </svg>
+              如何获取API密钥
+            </button>
+            <p class="text-xs text-gray-500 text-center mt-2">详细的API申请教程</p>
           </div>
         </div>
         
@@ -1025,9 +992,30 @@ onMounted(() => {
                 <svg class="w-5 h-5 text-amber-500 mr-2 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L3.732 16.5c-.77.833.192 2.5 1.732 2.5z"></path>
                 </svg>
-                <div>
+                <div class="flex-1">
                   <p class="font-medium">{{ error }}</p>
-                  <p class="mt-1 text-xs text-amber-600">请点击右上角设置图标配置API密钥以获取图片。</p>
+                  <p class="mt-2 text-xs text-amber-600">为了搜索高质量的免费图片，你需要先配置API密钥</p>
+                  <div class="mt-3 flex flex-col sm:flex-row gap-2 justify-center">
+                    <button 
+                      @click="showApiSettings = true"
+                      class="inline-flex items-center px-3 py-2 bg-amber-600 text-white rounded-lg hover:bg-amber-700 transition-colors text-xs font-medium"
+                    >
+                      <svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path>
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path>
+                      </svg>
+                      立即设置
+                    </button>
+                    <button 
+                      @click="emit('showTutorial')"
+                      class="inline-flex items-center px-3 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-xs font-medium"
+                    >
+                      <svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+                      </svg>
+                      查看教程
+                    </button>
+                  </div>
                 </div>
               </div>
             </div>

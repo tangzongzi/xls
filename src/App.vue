@@ -1,10 +1,25 @@
 <script setup>
 import { ref } from 'vue';
 import ImageTextMatcher from './components/ImageTextMatcher/ImageTextMatcher.vue';
+import ApiTutorial from './components/ApiTutorial/ApiTutorial.vue';
+
+// 页面状态管理
+const currentPage = ref('home'); // 'home' 或 'tutorial'
+
+// 切换到教程页面
+const showTutorial = () => {
+  currentPage.value = 'tutorial';
+};
+
+// 返回主页
+const showHome = () => {
+  currentPage.value = 'home';
+};
 </script>
 
 <template>
-  <div class="min-h-screen bg-gradient-to-br from-emerald-50 via-white to-teal-50 py-6 px-2 sm:px-4 lg:px-6">
+  <!-- 主页面 -->
+  <div v-if="currentPage === 'home'" class="min-h-screen bg-gradient-to-br from-emerald-50 via-white to-teal-50 py-6 px-2 sm:px-4 lg:px-6">
     <div class="w-full">
       <header class="text-center mb-8">
         <div class="inline-flex items-center justify-center w-16 h-16 bg-gradient-to-r from-emerald-500 to-teal-500 rounded-2xl mb-4 shadow-lg">
@@ -20,10 +35,12 @@ import ImageTextMatcher from './components/ImageTextMatcher/ImageTextMatcher.vue
           <span class="w-2 h-2 bg-emerald-500 rounded-full mr-2 animate-pulse"></span>
           智能匹配 · 一键生成 · 高清输出
         </div>
+        
+
       </header>
       
       <main>
-        <ImageTextMatcher />
+        <ImageTextMatcher @showTutorial="showTutorial" />
       </main>
       
       <footer class="mt-12 text-center">
@@ -36,6 +53,9 @@ import ImageTextMatcher from './components/ImageTextMatcher/ImageTextMatcher.vue
       </footer>
     </div>
   </div>
+
+  <!-- API教程页面 -->
+  <ApiTutorial v-else-if="currentPage === 'tutorial'" @back="showHome" />
 </template>
 
 <style>

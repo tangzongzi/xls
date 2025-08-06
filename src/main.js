@@ -11,7 +11,7 @@ axios.defaults.headers.common['Accept'] = 'application/json'
 axios.interceptors.response.use(
   response => response,
   error => {
-    console.error('API请求错误:', error)
+    // API请求错误，静默处理
     return Promise.reject(error)
   }
 )

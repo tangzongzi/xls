@@ -100,6 +100,14 @@ export const loadApiKeys = () => {
 };
 
 /**
+ * 获取API配置对象
+ * @returns {Object} API配置对象
+ */
+export const getApiConfig = () => {
+  return apiConfig;
+};
+
+/**
  * 搜索图片
  * @param {string} query - 搜索关键词
  * @param {string} provider - API提供商名称
